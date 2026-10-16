@@ -20,7 +20,8 @@ internal static class Program
 
         builder.Services
             .Configure<RunrunItOptions>(builder.Configuration.GetSection(RunrunItOptions.SectionName))
-            .Configure<CodeAnalysisOptions>(builder.Configuration.GetSection(CodeAnalysisOptions.SectionName));
+            .Configure<CodeAnalysisOptions>(builder.Configuration.GetSection(CodeAnalysisOptions.SectionName))
+            .Configure<WebissReleaseOptions>(builder.Configuration.GetSection(WebissReleaseOptions.SectionName));
 
         // Default host logging on Windows includes EventLog, which fails when published
         // or run with roll-forward on a newer runtime (missing System.Diagnostics.EventLog).
@@ -28,8 +29,15 @@ internal static class Program
         builder.Logging.AddConsole(consoleLogOptions => consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace);
 
         builder.Services.AddHttpClient<IRunrunItClient, RunrunItClient>();
+        builder.Services.AddHttpClient("webiss-version", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("MeuRunrunItMCP/1.0");
+        });
         builder.Services.AddSingleton<ICodeIndexService, CodeIndexService>();
         builder.Services.AddSingleton<ITaskAnalysisService, TaskAnalysisService>();
+        builder.Services.AddSingleton<IWebissReleaseCommentService, WebissReleaseCommentService>();
+        builder.Services.AddHostedService<WebissReleaseCommentWorker>();
 
         builder.Services.AddSingleton<RunrunItTools>();
         builder.Services.AddSingleton<CodeAnalysisTools>();

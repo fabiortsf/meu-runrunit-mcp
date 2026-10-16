@@ -225,6 +225,8 @@ No chat, o agente deve listar ferramentas como:
 
 - `analyze_task_against_code`
 - `get_task_context`
+- `comentar_tarefa`
+- `comentar_entregas_webiss`
 - `search`
 - `read_file`
 - `validate_project_root`
@@ -310,6 +312,8 @@ analyze_task_against_code taskId 200 projectRoot C:\dev\cliente-b\api-node
 |------------|-------------|------------------------|
 | `analyze_task_against_code` | Fluxo completo (tarefa + busca no código) | `taskId`, **`projectRoot`**, `extraQuery?`, `maxResults?` |
 | `get_task_context` | Só título, descrição e comentários | `taskId` |
+| `comentar_tarefa` | Publicar um comentário na tarefa | `taskId`, `text` |
+| `comentar_entregas_webiss` | Comentar a próxima versão nas entregas homologadas do WebISS, sem repetir | — |
 | `search` | Busca manual por termos | **`projectRoot`**, `query?`, `taskContext?`, `maxResults?` |
 | `read_file` | Ler trecho de um arquivo | **`projectRoot`**, `relativePath`, `startLine?`, `endLine?` |
 | `validate_project_root` | Testar caminho antes de analisar | `projectRoot?` |
@@ -515,6 +519,8 @@ dotnet run --project MeuRunrunItMCP.csproj
 - `GET /tasks/{id}` — detalhe da tarefa (título, projeto, quadro, etc.)
 - `GET /descriptions?subject_type=Task&subject_id={id}` — corpo da descrição (HTML)
 - `GET /tasks/{id}/comments` — comentários da tarefa (apenas de **usuários**; automáticos do Runrun.it são filtrados)
+- `POST /comments` — cria um comentário na tarefa (`task_id`, `text`)
+- `GET /tasks?is_closed=true&sort=close_date&sort_dir=desc` — tarefas entregues; homologada quando `evaluation_status` é `approved` e o cliente é WebISS
 
 Documentação oficial: https://runrun.it/api/documentation
 

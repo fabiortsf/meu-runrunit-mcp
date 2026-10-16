@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using MeuRunrunItMCP.Abstractions;
 using MeuRunrunItMCP.Models;
@@ -41,6 +42,129 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
             url,
             comments,
             combined);
+    }
+
+    public async Task<CommentSnippet> CreateTaskCommentAsync(
+        int taskId,
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        var config = options.Value;
+        ValidateCredentials(config);
+
+        if (taskId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(taskId), "O ID da tarefa deve ser maior que zero.");
+
+        if (string.IsNullOrWhiteSpace(text))
+            throw new ArgumentException("O texto do comentário não pode ser vazio.", nameof(text));
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            task_id = taskId,
+            text = text.Trim()
+        });
+
+        using var request = CreateRequest(HttpMethod.Post, config, "comments");
+        request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = UnwrapComment(doc.RootElement);
+
+        var id = GetInt(root, "id") ?? 0;
+        var commentText = TextHelper.StripHtml(GetString(root, "text"));
+        if (string.IsNullOrWhiteSpace(commentText))
+            commentText = text.Trim();
+        var author = GetCommentAuthor(root);
+        var createdAt = GetString(root, "created_at");
+
+        return new CommentSnippet(id, author, createdAt, commentText);
+    }
+
+    public async Task<IReadOnlyList<ClosedTaskItem>> ListClosedTasksSinceAsync(
+        DateTimeOffset since,
+        CancellationToken cancellationToken = default)
+    {
+        var config = options.Value;
+        ValidateCredentials(config);
+
+        var result = new List<ClosedTaskItem>();
+        const int pageSize = 100;
+
+        for (var page = 1; page <= 20; page++)
+        {
+            var query = new Dictionary<string, string>
+            {
+                ["is_closed"] = "true",
+                ["sort"] = "close_date",
+                ["sort_dir"] = "desc",
+                ["limit"] = pageSize.ToString(),
+                ["page"] = page.ToString()
+            };
+
+            using var request = CreateRequest(HttpMethod.Get, config, "tasks", query);
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            await EnsureSuccessAsync(response, cancellationToken);
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var batch = ParseClosedTasks(doc.RootElement);
+            if (batch.Count == 0)
+                break;
+
+            var reachedOlder = false;
+            foreach (var task in batch)
+            {
+                if (task.CloseDate is null)
+                    continue;
+
+                if (task.CloseDate < since)
+                {
+                    reachedOlder = true;
+                    break;
+                }
+
+                result.Add(task);
+            }
+
+            if (reachedOlder || batch.Count < pageSize)
+                break;
+        }
+
+        return result;
+    }
+
+    public async Task<bool> HasCommentContainingAsync(
+        int taskId,
+        string marker,
+        CancellationToken cancellationToken = default)
+    {
+        var config = options.Value;
+        ValidateCredentials(config);
+
+        using var request = CreateRequest(HttpMethod.Get, config, $"tasks/{taskId}/comments");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return false;
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        foreach (var element in EnumerateCommentElements(doc.RootElement))
+        {
+            var commentElement = element.TryGetProperty("comment", out var wrapped) ? wrapped : element;
+            var text = TextHelper.StripHtml(GetString(commentElement, "text") ?? GetString(commentElement, "body"));
+            if (text.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private async Task<string?> GetTaskDescriptionAsync(
@@ -156,17 +280,63 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
         return ParseComments(doc.RootElement);
     }
 
-    private static IReadOnlyList<CommentSnippet> ParseComments(JsonElement root)
+    private static List<ClosedTaskItem> ParseClosedTasks(JsonElement root)
     {
-        var elements = root.ValueKind switch
+        var result = new List<ClosedTaskItem>();
+        foreach (var element in EnumerateTaskElements(root))
+        {
+            var task = element.TryGetProperty("task", out var wrapped) ? wrapped : element;
+            var id = GetInt(task, "id");
+            if (id is null or <= 0)
+                continue;
+
+            result.Add(new ClosedTaskItem(
+                id.Value,
+                GetString(task, "title") ?? $"Tarefa {id}",
+                GetString(task, "project_name"),
+                GetString(task, "client_name"),
+                GetString(task, "board_stage_name"),
+                GetString(task, "evaluation_status"),
+                ParseDate(task, "close_date")));
+        }
+
+        return result;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateTaskElements(JsonElement root) =>
+        root.ValueKind switch
+        {
+            JsonValueKind.Array => root.EnumerateArray(),
+            JsonValueKind.Object when root.TryGetProperty("tasks", out var tasks) && tasks.ValueKind == JsonValueKind.Array
+                => tasks.EnumerateArray(),
+            JsonValueKind.Object when root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
+                => data.EnumerateArray(),
+            _ => []
+        };
+
+    private static IEnumerable<JsonElement> EnumerateCommentElements(JsonElement root) =>
+        root.ValueKind switch
         {
             JsonValueKind.Array => root.EnumerateArray(),
             JsonValueKind.Object when root.TryGetProperty("comments", out var comments) && comments.ValueKind == JsonValueKind.Array
                 => comments.EnumerateArray(),
             JsonValueKind.Object when root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
                 => data.EnumerateArray(),
-            _ => Enumerable.Empty<JsonElement>()
+            _ => []
         };
+
+    private static DateTimeOffset? ParseDate(JsonElement element, string propertyName)
+    {
+        var raw = GetString(element, propertyName);
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        return DateTimeOffset.TryParse(raw, out var parsed) ? parsed : null;
+    }
+
+    private static IReadOnlyList<CommentSnippet> ParseComments(JsonElement root)
+    {
+        var elements = EnumerateCommentElements(root);
 
         var result = new List<CommentSnippet>();
         foreach (var element in elements)
@@ -201,10 +371,19 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
                 ?? "Desconhecido";
         }
 
-        return GetString(element, "user_name")
+        return GetString(element, "commenter_name")
+            ?? GetString(element, "user_name")
             ?? GetString(element, "author_name")
             ?? GetString(element, "performer_name")
             ?? "Desconhecido";
+    }
+
+    private static JsonElement UnwrapComment(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("comment", out var comment))
+            return comment;
+
+        return root;
     }
 
     private static HttpRequestMessage CreateRequest(
