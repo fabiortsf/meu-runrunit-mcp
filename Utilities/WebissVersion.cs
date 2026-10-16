@@ -19,13 +19,13 @@ internal static partial class WebissVersion
         !string.IsNullOrWhiteSpace(text)
         && text.Contains(CommentPrefix, StringComparison.OrdinalIgnoreCase);
 
-    public static string ReadFromHtml(string html)
+    public static string ReadFromHtml(string html, string pageUrl)
     {
         var match = PageVersionRegex().Match(html);
         if (!match.Success)
         {
             throw new InvalidOperationException(
-                "Não encontrei a versão no rodapé de https://aracajuse.webiss.com.br (esperado 'Versão: 5.3.0.43').");
+                $"Não encontrei a versão no rodapé de {pageUrl}. O texto esperado é 'Versão: 5.3.0.43'.");
         }
 
         return match.Groups[1].Value;

@@ -23,11 +23,18 @@ public sealed class WebissReleaseCommentService(
         WriteIndented = true
     };
 
-    public async Task<string> CommentNewDeliveriesAsync(CancellationToken cancellationToken = default)
+    public const string MissingSiteGuidance =
+        "Informe a URL da página inicial do ambiente WebISS. A versão corrente fica no rodapé, no texto 'Versão: 5.3.0.43'. O comentário publica esse número com o último trecho somado em 1.";
+
+    public async Task<string> CommentNewDeliveriesAsync(string? siteUrl = null, CancellationToken cancellationToken = default)
     {
         var config = options.Value;
         if (!config.Enabled)
             return "A verificação de entregas WEBISS está desligada.";
+
+        var pageUrl = ResolveSiteUrl(siteUrl, config.VersionPageUrl);
+        if (pageUrl is null)
+            return MissingSiteGuidance;
 
         var directory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -51,7 +58,7 @@ public sealed class WebissReleaseCommentService(
         {
             var state = await LoadStateAsync(statePath, cancellationToken);
             var since = ResolveSince(state, config);
-            var currentVersion = await ReadCurrentVersionAsync(config, cancellationToken);
+            var currentVersion = await ReadCurrentVersionAsync(pageUrl, cancellationToken);
             var nextVersion = WebissVersion.Increment(currentVersion);
             var commentText = WebissVersion.FormatComment(nextVersion);
 
@@ -123,20 +130,43 @@ public sealed class WebissReleaseCommentService(
 
     private static DateTimeOffset ResolveSince(ReleaseState state, WebissReleaseOptions config)
     {
-        if (state.LastRunUtc is DateTimeOffset lastRun)
-            return lastRun.Subtract(TimeSpan.FromMinutes(Math.Max(0, config.OverlapMinutes)));
+        var lookbackHours = Math.Max(1, config.LookbackHours);
+        var since = DateTimeOffset.UtcNow.AddHours(-lookbackHours);
 
-        var lookbackHours = Math.Max(1, config.InitialLookbackHours);
-        return DateTimeOffset.UtcNow.AddHours(-lookbackHours);
+        if (state.LastRunUtc is DateTimeOffset lastRun)
+        {
+            var fromLastRun = lastRun.Subtract(TimeSpan.FromMinutes(Math.Max(0, config.OverlapMinutes)));
+            if (fromLastRun < since)
+                since = fromLastRun;
+        }
+
+        return since;
     }
 
-    private async Task<string> ReadCurrentVersionAsync(WebissReleaseOptions config, CancellationToken cancellationToken)
+    private static string? ResolveSiteUrl(string? siteUrl, string? configuredUrl)
+    {
+        var candidate = string.IsNullOrWhiteSpace(siteUrl) ? configuredUrl : siteUrl;
+        if (string.IsNullOrWhiteSpace(candidate))
+            return null;
+
+        if (!Uri.TryCreate(candidate.Trim(), UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https"))
+        {
+            throw new ArgumentException(
+                "A URL do ambiente precisa ser absoluta e começar com http:// ou https://. " + MissingSiteGuidance,
+                nameof(siteUrl));
+        }
+
+        return uri.ToString();
+    }
+
+    private async Task<string> ReadCurrentVersionAsync(string pageUrl, CancellationToken cancellationToken)
     {
         var client = httpClientFactory.CreateClient("webiss-version");
-        using var response = await client.GetAsync(config.VersionPageUrl, cancellationToken);
+        using var response = await client.GetAsync(pageUrl, cancellationToken);
         response.EnsureSuccessStatusCode();
         var html = await response.Content.ReadAsStringAsync(cancellationToken);
-        return WebissVersion.ReadFromHtml(html);
+        return WebissVersion.ReadFromHtml(html, pageUrl);
     }
 
     private static async Task<ReleaseState> LoadStateAsync(string path, CancellationToken cancellationToken)

@@ -33,7 +33,9 @@ public sealed class RunrunItTools(IRunrunItClient runrunItClient, IWebissRelease
             """;
     }
 
-    [McpServerTool(Name = "comentar_entregas_webiss"), Description("Lista tarefas encerradas e homologadas do WebISS e comenta, uma única vez, a próxima versão de https://aracajuse.webiss.com.br.")]
-    public Task<string> CommentWebissDeliveries(CancellationToken cancellationToken) =>
-        releaseComments.CommentNewDeliveriesAsync(cancellationToken);
+    [McpServerTool(Name = "comentar_entregas_webiss"), Description("Lista tarefas encerradas e homologadas do WebISS e comenta, uma única vez, a próxima versão do ambiente informado. A URL não vem pronta: use a página inicial daquele município. A versão corrente está no rodapé, no texto 'Versão: 5.3.0.43'. O comentário soma 1 no último número.")]
+    public Task<string> CommentWebissDeliveries(
+        [Description("URL da página inicial do ambiente WebISS, por exemplo o portal do município. Leia o rodapé no formato Versão: 5.3.0.43.")] string siteUrl,
+        CancellationToken cancellationToken) =>
+        releaseComments.CommentNewDeliveriesAsync(siteUrl, cancellationToken);
 }

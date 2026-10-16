@@ -14,8 +14,13 @@ public sealed class WebissReleaseCommentWorker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var config = options.Value;
-        if (!config.Enabled)
+        if (!config.Enabled || string.IsNullOrWhiteSpace(config.VersionPageUrl))
+        {
+            logger.LogInformation(
+                "Verificação automática de entregas WEBISS sem página de versão. Informe a URL na tool comentar_entregas_webiss. {Guidance}",
+                WebissReleaseCommentService.MissingSiteGuidance);
             return;
+        }
 
         var interval = TimeSpan.FromHours(Math.Max(1, config.IntervalHours));
         using var timer = new PeriodicTimer(interval);
@@ -24,7 +29,7 @@ public sealed class WebissReleaseCommentWorker(
         {
             try
             {
-                var report = await commentService.CommentNewDeliveriesAsync(stoppingToken);
+                var report = await commentService.CommentNewDeliveriesAsync(config.VersionPageUrl, stoppingToken);
                 logger.LogInformation("Verificação de entregas WEBISS concluída. {Report}", report);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

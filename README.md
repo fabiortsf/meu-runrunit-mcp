@@ -313,7 +313,7 @@ analyze_task_against_code taskId 200 projectRoot C:\dev\cliente-b\api-node
 | `analyze_task_against_code` | Fluxo completo (tarefa + busca no código) | `taskId`, **`projectRoot`**, `extraQuery?`, `maxResults?` |
 | `get_task_context` | Só título, descrição e comentários | `taskId` |
 | `comentar_tarefa` | Publicar um comentário na tarefa | `taskId`, `text` |
-| `comentar_entregas_webiss` | Comentar a próxima versão nas entregas homologadas do WebISS, sem repetir | — |
+| `comentar_entregas_webiss` | Comentar a próxima versão nas entregas homologadas do WebISS, sem repetir | **`siteUrl`**: página inicial do ambiente. A versão está no rodapé, em `Versão: 5.3.0.43`; o comentário soma 1 no último número |
 | `search` | Busca manual por termos | **`projectRoot`**, `query?`, `taskContext?`, `maxResults?` |
 | `read_file` | Ler trecho de um arquivo | **`projectRoot`**, `relativePath`, `startLine?`, `endLine?` |
 | `validate_project_root` | Testar caminho antes de analisar | `projectRoot?` |
