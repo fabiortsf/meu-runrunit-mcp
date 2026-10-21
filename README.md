@@ -20,6 +20,7 @@ Este repositório é só o **servidor MCP**. O código que você analisa fica em
 10. [Solução de problemas](#solução-de-problemas)
 11. [Versionamento e releases](#versionamento-e-releases)
 12. [Build e desenvolvimento](#build-e-desenvolvimento)
+13. [API Runrun.it](#api-runrunit)
 
 ---
 
@@ -223,8 +224,9 @@ Feche e abra o Cursor (ou recarregue a janela) para o servidor MCP subir.
 
 No chat, o agente deve listar ferramentas como:
 
-- `analyze_task_against_code`
-- `get_task_context`
+- `analisar_tarefa`
+- `obter_informacoes_da_tarefa`
+- `obter_html_da_descricao`
 - `comentar_tarefa`
 - `comentar_entregas_webiss`
 - `search`
@@ -271,7 +273,7 @@ O MCP lê o disco diretamente — não depende de qual pasta está aberta no edi
 3. No Cursor, peça algo como:
 
 ```text
-Use analyze_task_against_code com taskId 12345 e projectRoot C:\dev\cliente-a\portal-mvc5.
+Use analisar_tarefa com taskId 12345 e projectRoot C:\dev\cliente-a\portal-mvc5.
 Depois diga quais arquivos devo alterar e por quê.
 ```
 
@@ -284,24 +286,27 @@ Depois diga quais arquivos devo alterar e por quê.
 ### Cenário: nova tarefa em um projeto MVC 5
 
 ```text
-1. validate_project_root  → confirma que o caminho existe
-2. analyze_task_against_code → tarefa + comentários + lista de arquivos
-3. read_file               → trechos dos arquivos mais relevantes
-4. (você / agente)         → plano de implementação e código
+1. validate_project_root        → confirma que o caminho existe
+2. analisar_tarefa              → tarefa + comentários + lista de arquivos
+3. obter_html_da_descricao      → HTML da descrição e imagens embutidas, se precisar
+4. read_file                    → trechos dos arquivos mais relevantes
+5. (você / agente)              → plano de implementação e código
 ```
 
 ### Cenário: só ler a tarefa (sem código)
 
 ```text
-get_task_context com taskId 12345
+obter_informacoes_da_tarefa com taskId 12345
 ```
+
+A descrição nesse retorno vem em texto, sem tags. Para o HTML e as imagens, use `obter_html_da_descricao`.
 
 ### Cenário: outro repositório no mesmo dia
 
 Troque apenas o `projectRoot`; credenciais Runrun.it são as mesmas:
 
 ```text
-analyze_task_against_code taskId 200 projectRoot C:\dev\cliente-b\api-node
+analisar_tarefa taskId 200 projectRoot C:\dev\cliente-b\api-node
 ```
 
 ---
@@ -310,10 +315,11 @@ analyze_task_against_code taskId 200 projectRoot C:\dev\cliente-b\api-node
 
 | Ferramenta | Quando usar | Parâmetros principais |
 |------------|-------------|------------------------|
-| `analyze_task_against_code` | Fluxo completo (tarefa + busca no código) | `taskId`, **`projectRoot`**, `extraQuery?`, `maxResults?` |
-| `get_task_context` | Só título, descrição e comentários | `taskId` |
-| `comentar_tarefa` | Publicar um comentário na tarefa | `taskId`, `text` |
-| `comentar_entregas_webiss` | Comentar a próxima versão nas entregas homologadas do WebISS, sem repetir | **`siteUrl`**: página inicial do ambiente. A versão está no rodapé, em `Versão: 5.3.0.43`; o comentário soma 1 no último número |
+| `analisar_tarefa` | Fluxo completo (tarefa + busca no código) | `taskId`, **`projectRoot`**, `extraQuery?`, `maxResults?` |
+| `obter_informacoes_da_tarefa` | Título, descrição em texto e comentários de usuários | `taskId` |
+| `obter_html_da_descricao` | HTML completo da descrição e as imagens embutidas, cada uma com URL temporária de download | `taskId` |
+| `comentar_tarefa` | Publicar um comentário com o texto que você enviar | `taskId`, `text` |
+| `comentar_entregas_webiss` | Comentar a próxima versão só nas entregas homologadas do WebISS atribuídas ao usuário do token | **`siteUrl`**: página inicial do ambiente. A versão está no rodapé, em `Versão: 5.3.0.43` |
 | `search` | Busca manual por termos | **`projectRoot`**, `query?`, `taskContext?`, `maxResults?` |
 | `read_file` | Ler trecho de um arquivo | **`projectRoot`**, `relativePath`, `startLine?`, `endLine?` |
 | `validate_project_root` | Testar caminho antes de analisar | `projectRoot?` |
@@ -321,6 +327,36 @@ analyze_task_against_code taskId 200 projectRoot C:\dev\cliente-b\api-node
 Tipos de arquivo considerados na busca (entre outros): `.cs`, `.cshtml`, `.js`, `.ts`, `.tsx`, `.vue`, `.py`, `.java`, `.go`, `.json`, `.xml`, `.config`, `.sql`, `.md`.
 
 Pastas ignoradas: `bin`, `obj`, `node_modules`, `.git`, `dist`, `packages`, etc.
+
+### HTML da descrição e imagens
+
+`obter_informacoes_da_tarefa` remove o HTML. `obter_html_da_descricao` devolve o corpo inteiro, inclusive as tags `<img>`.
+
+Cada imagem que aponta para um documento do Runrun.it inclui:
+
+- a origem (`src`)
+- o id do documento
+- a URL temporária vinda de `GET /documents/{id}/download` (resposta 302 para o arquivo)
+
+### Comentário automático de versão
+
+`comentar_entregas_webiss` só comenta a tarefa quando tudo isto vale:
+
+- encerrada
+- o usuário do token está alocado nela, pelo **id** (`GET /users/me`) ou pelo **nome**
+- cliente ou projeto é WebISS
+- `evaluation_status` é `approved`
+- a etapa não contém "cancel"
+- ainda não existe o comentário de versão
+
+O texto é fixo. O número sai do rodapé da página, com o último trecho somado em 1:
+
+```html
+Disponível a partir da versão 5.3.0.44.
+<i>Automated comment by Cursor IA</i>
+```
+
+`comentar_tarefa` continua aceitando qualquer texto em `text`.
 
 ---
 
@@ -332,20 +368,20 @@ Substitua `TASK_ID`, caminhos e nomes pelos seus valores reais.
 
 ```text
 Valide projectRoot C:\dev\acme\MeuPortalMvc5.
-Em seguida use analyze_task_against_code na tarefa TASK_ID com esse projectRoot.
+Em seguida use analisar_tarefa na tarefa TASK_ID com esse projectRoot.
 Liste controllers e views impactados e um plano de alteração.
 ```
 
 ### ASP.NET Core
 
 ```text
-analyze_task_against_code taskId TASK_ID projectRoot C:\dev\acme\MinhaApiCore
+analisar_tarefa taskId TASK_ID projectRoot C:\dev\acme\MinhaApiCore
 ```
 
 ### Frontend React / Node
 
 ```text
-analyze_task_against_code taskId TASK_ID projectRoot C:\dev\acme\frontend
+analisar_tarefa taskId TASK_ID projectRoot C:\dev\acme\frontend
 extraQuery "checkout pagamento"
 ```
 
@@ -356,12 +392,26 @@ Use read_file com projectRoot C:\dev\acme\MeuPortalMvc5,
 relativePath Areas/Vendas/Controllers/PedidoController.cs e startLine 1 endLine 120.
 ```
 
+### HTML e imagens da descrição
+
+```text
+Use obter_html_da_descricao na tarefa TASK_ID.
+Traga o HTML e a URL temporária de cada imagem embutida.
+```
+
+### Comentário de versão nas minhas entregas WebISS
+
+```text
+Use comentar_entregas_webiss com siteUrl https://portal.municipio.gov.br.
+Comente só as tarefas encerradas e homologadas atribuídas a mim.
+```
+
 ### Vários projetos na mesma sessão
 
 ```text
 Primeiro analise a tarefa 100 no projeto C:\dev\projeto-a.
 Depois analise a tarefa 200 no projeto C:\dev\projeto-b.
-Use analyze_task_against_code em cada um com o projectRoot correto.
+Use analisar_tarefa em cada um com o projectRoot correto.
 ```
 
 ---
@@ -382,6 +432,15 @@ Arquivo `appsettings.json` (valores vazios por padrão):
     "MaxSearchResults": 25,
     "MaxFileReadLines": 200,
     "MaxTerms": 30
+  },
+  "WebissRelease": {
+    "Enabled": true,
+    "ClientName": "WebISS",
+    "VersionPageUrl": "",
+    "IntervalHours": 1,
+    "LookbackHours": 24,
+    "OverlapMinutes": 15,
+    "MaxCommentsPerRun": 20
   }
 }
 ```
@@ -395,6 +454,8 @@ dotnet user-secrets set "CodeAnalysis:ProjectRoot" "C:\dev\meu-repo-padrao"
 ```
 
 No chat pode omitir `projectRoot` — o MCP usa esse padrão. Para outro projeto, passe `projectRoot` na chamada (ele tem prioridade).
+
+`WebissRelease:VersionPageUrl` é opcional. Sem ela, a verificação automática não comenta e `comentar_entregas_webiss` exige `siteUrl` na chamada. `LookbackHours` define a janela das tarefas encerradas (padrão 24 h) e `MaxCommentsPerRun` limita quantos comentários saem em cada execução (padrão 20).
 
 ### Variáveis de ambiente (alternativa)
 
@@ -516,11 +577,17 @@ dotnet run --project MeuRunrunItMCP.csproj
 
 ## API Runrun.it
 
-- `GET /tasks/{id}` — detalhe da tarefa (título, projeto, quadro, etc.)
-- `GET /descriptions?subject_type=Task&subject_id={id}` — corpo da descrição (HTML)
-- `GET /tasks/{id}/comments` — comentários da tarefa (apenas de **usuários**; automáticos do Runrun.it são filtrados)
-- `POST /comments` — cria um comentário na tarefa (`task_id`, `text`)
-- `GET /tasks?is_closed=true&sort=close_date&sort_dir=desc` — tarefas entregues; homologada quando `evaluation_status` é `approved` e o cliente é WebISS
+Base: `https://runrun.it/api/v1.0`. Toda chamada envia `App-Key` e `User-Token`.
+
+| Método | Caminho | Uso |
+|--------|---------|-----|
+| `GET` | `/tasks/{id}` | Detalhe da tarefa (título, projeto, quadro, URL) |
+| `GET` | `/tasks/{id}/description` | HTML completo da descrição, inclusive `<img>` |
+| `GET` | `/tasks/{id}/comments` | Comentários; o MCP guarda só os de usuários |
+| `POST` | `/comments` | Cria comentário (`task_id`, `text`) |
+| `GET` | `/users/me` | Usuário dono do token (id e nome) |
+| `GET` | `/tasks?is_closed=true&assignee_id={id}&sort=close_date&sort_dir=desc&limit=100&page=` | Tarefas encerradas alocadas a esse usuário. O assignment entra se o id ou o nome coincidir |
+| `GET` | `/documents/{id}/download` | Resposta 302 para a URL temporária da imagem embutida |
 
 Documentação oficial: https://runrun.it/api/documentation
 
@@ -536,3 +603,5 @@ Documentação oficial: https://runrun.it/api/documentation
 | Posso usar em vários projetos? | **Sim.** Mude o `projectRoot` a cada tarefa/cliente. |
 | O MCP analisa só MVC 5? | **Não.** Qualquer repo com arquivos-fonte suportados. |
 | Onde ficam as credenciais Runrun.it? | User Secrets ou `env` no `mcp.json` global. |
+| `comentar_entregas_webiss` comenta tarefa de outra pessoa? | **Não.** Só tarefas alocadas ao usuário do token, pelo id ou pelo nome. |
+| Como leio as imagens da descrição? | `obter_html_da_descricao`. A outra leitura de tarefa devolve texto sem HTML. |

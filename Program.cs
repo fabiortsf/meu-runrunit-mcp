@@ -29,6 +29,11 @@ internal static class Program
         builder.Logging.AddConsole(consoleLogOptions => consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace);
 
         builder.Services.AddHttpClient<IRunrunItClient, RunrunItClient>();
+        builder.Services.AddHttpClient("runrunit-no-redirect")
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            });
         builder.Services.AddHttpClient("webiss-version", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);

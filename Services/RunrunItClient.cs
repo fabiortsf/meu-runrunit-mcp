@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -5,12 +6,17 @@ using MeuRunrunItMCP.Abstractions;
 using MeuRunrunItMCP.Models;
 using MeuRunrunItMCP.Options;
 using MeuRunrunItMCP.Utilities;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
 
 namespace MeuRunrunItMCP.Services;
 
-public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptions> options) : IRunrunItClient
+public sealed class RunrunItClient(
+    HttpClient httpClient,
+    IHttpClientFactory httpClientFactory,
+    IOptions<RunrunItOptions> options) : IRunrunItClient
 {
+    private const string NoRedirectClient = "runrunit-no-redirect";
     public async Task<TaskContext> GetTaskContextAsync(int taskId, CancellationToken cancellationToken = default)
     {
         var config = options.Value;
@@ -42,6 +48,35 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
             url,
             comments,
             combined);
+    }
+
+    public async Task<TaskDescriptionHtml> GetTaskDescriptionHtmlAsync(
+        int taskId,
+        CancellationToken cancellationToken = default)
+    {
+        var config = options.Value;
+        ValidateCredentials(config);
+
+        if (taskId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(taskId), "O ID da tarefa deve ser maior que zero.");
+
+        var html = await GetDescriptionFromTaskDescriptionApiAsync(config, taskId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(html))
+            html = await GetDescriptionFromTaskAsync(config, taskId, cancellationToken);
+
+        var images = new List<EmbeddedImage>();
+        foreach (var item in DescriptionImages.Extract(html))
+        {
+            string? downloadUrl = null;
+            if (item.DocumentId is int documentId)
+                downloadUrl = await ResolveDocumentDownloadUrlAsync(config, documentId, cancellationToken);
+            else if (IsAbsoluteHttp(item.Source))
+                downloadUrl = item.Source;
+
+            images.Add(new EmbeddedImage(item.Source, item.DocumentId, downloadUrl));
+        }
+
+        return new TaskDescriptionHtml(taskId, string.IsNullOrWhiteSpace(html) ? null : html, images);
     }
 
     public async Task<CommentSnippet> CreateTaskCommentAsync(
@@ -84,12 +119,38 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
         return new CommentSnippet(id, author, createdAt, commentText);
     }
 
+    public async Task<RunrunUser> GetCurrentUserAsync(CancellationToken cancellationToken = default)
+    {
+        var config = options.Value;
+        ValidateCredentials(config);
+
+        using var request = CreateRequest(HttpMethod.Get, config, "users/me");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("user", out var wrapped))
+            root = wrapped;
+
+        var id = GetString(root, "id")?.Trim();
+        if (string.IsNullOrWhiteSpace(id))
+            throw new InvalidOperationException("A API do Runrun.it não informou o id do usuário do token.");
+
+        return new RunrunUser(id, GetString(root, "name")?.Trim() ?? "");
+    }
+
     public async Task<IReadOnlyList<ClosedTaskItem>> ListClosedTasksSinceAsync(
         DateTimeOffset since,
+        RunrunUser assignee,
         CancellationToken cancellationToken = default)
     {
         var config = options.Value;
         ValidateCredentials(config);
+
+        if (string.IsNullOrWhiteSpace(assignee.Id))
+            throw new ArgumentException("O usuário atribuído precisa ter id.", nameof(assignee));
 
         var result = new List<ClosedTaskItem>();
         const int pageSize = 100;
@@ -99,6 +160,7 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
             var query = new Dictionary<string, string>
             {
                 ["is_closed"] = "true",
+                ["assignee_id"] = assignee.Id,
                 ["sort"] = "close_date",
                 ["sort_dir"] = "desc",
                 ["limit"] = pageSize.ToString(),
@@ -111,7 +173,7 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var batch = ParseClosedTasks(doc.RootElement);
+            var batch = ParseClosedTasks(doc.RootElement, assignee);
             if (batch.Count == 0)
                 break;
 
@@ -166,6 +228,41 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
 
         return false;
     }
+
+    private async Task<string?> GetDescriptionFromTaskAsync(
+        RunrunItOptions config,
+        int taskId,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Get, config, $"tasks/{taskId}");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        return ExtractDescriptionFromElement(UnwrapRoot(doc.RootElement));
+    }
+
+    private async Task<string?> ResolveDocumentDownloadUrlAsync(
+        RunrunItOptions config,
+        int documentId,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(HttpMethod.Get, config, $"documents/{documentId}/download");
+        var client = httpClientFactory.CreateClient(NoRedirectClient);
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+        if ((int)response.StatusCode is < 300 or >= 400 || response.Headers.Location is not Uri location)
+            return null;
+
+        return location.IsAbsoluteUri
+            ? location.ToString()
+            : new Uri(new Uri("https://runrun.it"), location).ToString();
+    }
+
+    private static bool IsAbsoluteHttp(string source) =>
+        source.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+        || source.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
 
     private async Task<string?> GetTaskDescriptionAsync(
         RunrunItOptions config,
@@ -280,14 +377,40 @@ public sealed class RunrunItClient(HttpClient httpClient, IOptions<RunrunItOptio
         return ParseComments(doc.RootElement);
     }
 
-    private static List<ClosedTaskItem> ParseClosedTasks(JsonElement root)
+    private static bool IsAssignedTo(JsonElement task, RunrunUser assignee)
+    {
+        if (!task.TryGetProperty("assignments", out var assignments)
+            || assignments.ValueKind != JsonValueKind.Array
+            || assignments.GetArrayLength() == 0)
+        {
+            return true;
+        }
+
+        foreach (var assignment in assignments.EnumerateArray())
+        {
+            if (SameText(GetString(assignment, "assignee_id"), assignee.Id)
+                || SameText(GetString(assignment, "assignee_name"), assignee.Name))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool SameText(string? left, string? right) =>
+        !string.IsNullOrWhiteSpace(left)
+        && !string.IsNullOrWhiteSpace(right)
+        && string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static List<ClosedTaskItem> ParseClosedTasks(JsonElement root, RunrunUser assignee)
     {
         var result = new List<ClosedTaskItem>();
         foreach (var element in EnumerateTaskElements(root))
         {
             var task = element.TryGetProperty("task", out var wrapped) ? wrapped : element;
             var id = GetInt(task, "id");
-            if (id is null or <= 0)
+            if (id is null or <= 0 || !IsAssignedTo(task, assignee))
                 continue;
 
             result.Add(new ClosedTaskItem(

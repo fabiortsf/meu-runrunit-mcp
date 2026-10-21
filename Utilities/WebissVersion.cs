@@ -13,7 +13,7 @@ internal static partial class WebissVersion
     private static partial Regex VersionRegex();
 
     public static string FormatComment(string version) =>
-        $"{CommentPrefix}{version}.\n<i>Comentário automático by IA</i>";
+        $"{CommentPrefix}{version}.\n<i>Automated comment by Cursor IA</i>";
 
     public static bool ContainsMarker(string? text) =>
         !string.IsNullOrWhiteSpace(text)

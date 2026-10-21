@@ -16,6 +16,15 @@ public sealed class RunrunItTools(IRunrunItClient runrunItClient, IWebissRelease
         return context.ToMarkdown();
     }
 
+    [McpServerTool(Name = "obter_html_da_descricao"), Description("Retorna o HTML completo da descrição da tarefa e as imagens embutidas. Cada imagem de documento inclui a URL temporária de download.")]
+    public async Task<string> GetTaskDescriptionHtml(
+        [Description("ID numérico da tarefa no Runrun.it")] int taskId,
+        CancellationToken cancellationToken)
+    {
+        var description = await runrunItClient.GetTaskDescriptionHtmlAsync(taskId, cancellationToken);
+        return description.ToMarkdown();
+    }
+
     [McpServerTool(Name = "comentar_tarefa"), Description("Publica um comentário de usuário em uma tarefa do Runrun.it.")]
     public async Task<string> CreateTaskComment(
         [Description("ID numérico da tarefa no Runrun.it")] int taskId,
@@ -33,7 +42,7 @@ public sealed class RunrunItTools(IRunrunItClient runrunItClient, IWebissRelease
             """;
     }
 
-    [McpServerTool(Name = "comentar_entregas_webiss"), Description("Lista tarefas encerradas e homologadas do WebISS e comenta, uma única vez, a próxima versão do ambiente informado. A URL não vem pronta: use a página inicial daquele município. A versão corrente está no rodapé, no texto 'Versão: 5.3.0.43'. O comentário soma 1 no último número.")]
+    [McpServerTool(Name = "comentar_entregas_webiss"), Description("Lista tarefas encerradas e homologadas do WebISS atribuídas ao usuário do token (pelo id ou pelo nome) e comenta, uma única vez, a próxima versão do ambiente informado. A URL não vem pronta: use a página inicial daquele município. A versão corrente está no rodapé, no texto 'Versão: 5.3.0.43'. O comentário soma 1 no último número.")]
     public Task<string> CommentWebissDeliveries(
         [Description("URL da página inicial do ambiente WebISS, por exemplo o portal do município. Leia o rodapé no formato Versão: 5.3.0.43.")] string siteUrl,
         CancellationToken cancellationToken) =>

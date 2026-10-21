@@ -64,7 +64,8 @@ public sealed class WebissReleaseCommentService(
 
             using var scope = scopeFactory.CreateScope();
             var client = scope.ServiceProvider.GetRequiredService<IRunrunItClient>();
-            var tasks = await client.ListClosedTasksSinceAsync(since, cancellationToken);
+            var assignee = await client.GetCurrentUserAsync(cancellationToken);
+            var tasks = await client.ListClosedTasksSinceAsync(since, assignee, cancellationToken);
 
             var commented = new List<string>();
             var skipped = new List<string>();
@@ -109,7 +110,7 @@ public sealed class WebissReleaseCommentService(
             state.CommentedTaskIds = knownIds.TakeLast(MaxStoredTaskIds).ToList();
             await SaveStateAsync(statePath, state, cancellationToken);
 
-            return BuildReport(currentVersion, nextVersion, since, commented, skipped, hitCap, maxComments);
+            return BuildReport(assignee, currentVersion, nextVersion, since, commented, skipped, hitCap, maxComments);
         }
     }
 
@@ -198,6 +199,7 @@ public sealed class WebissReleaseCommentService(
     }
 
     private static string BuildReport(
+        RunrunUser assignee,
         string currentVersion,
         string nextVersion,
         DateTimeOffset since,
@@ -206,7 +208,12 @@ public sealed class WebissReleaseCommentService(
         bool hitCap,
         int maxComments)
     {
+        var who = string.IsNullOrWhiteSpace(assignee.Name)
+            ? assignee.Id
+            : $"{assignee.Name} ({assignee.Id})";
+
         var sb = new StringBuilder();
+        sb.AppendLine($"Atribuídas a: {who}");
         sb.AppendLine($"Versão publicada: {currentVersion}");
         sb.AppendLine($"Comentário: {WebissVersion.FormatComment(nextVersion)}");
         sb.AppendLine($"Janela desde: {since:yyyy-MM-dd HH:mm:ss zzz}");
