@@ -16,7 +16,8 @@ public sealed record TaskContext(
     string? BoardName,
     string? Url,
     IReadOnlyList<CommentSnippet> Comments,
-    string CombinedTextForSearch)
+    string CombinedTextForSearch,
+    IReadOnlyList<EmbeddedImage> Images)
 {
     public string ToMarkdown()
     {
@@ -35,6 +36,8 @@ public sealed record TaskContext(
 
         sb.AppendLine("## Descrição");
         sb.AppendLine(string.IsNullOrWhiteSpace(Description) ? "_Sem descrição._" : Description.Trim());
+        sb.AppendLine();
+        AppendImages(sb, Images);
         sb.AppendLine();
 
         sb.AppendLine($"## Comentários de usuários ({Comments.Count})");
@@ -59,5 +62,39 @@ public sealed record TaskContext(
         sb.AppendLine("```");
 
         return sb.ToString().TrimEnd();
+    }
+
+    internal static void AppendImages(StringBuilder sb, IReadOnlyList<EmbeddedImage> images)
+    {
+        sb.AppendLine($"## Imagens embutidas ({images.Count})");
+        if (images.Count == 0)
+        {
+            sb.AppendLine("_Nenhuma imagem na descrição._");
+            return;
+        }
+
+        var index = 1;
+        foreach (var image in images)
+        {
+            sb.AppendLine($"{index}. origem: {FormatImageSource(image.Source)}");
+            if (image.DocumentId is int documentId)
+                sb.AppendLine($"   documento: {documentId}");
+            if (!string.IsNullOrWhiteSpace(image.DownloadUrl))
+                sb.AppendLine($"   download: {image.DownloadUrl}");
+            index++;
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("A URL de download é temporária. Para o HTML completo, use `obter_html_da_descricao`.");
+    }
+
+    private static string FormatImageSource(string source)
+    {
+        if (!source.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            return source;
+
+        var comma = source.IndexOf(',');
+        var header = comma > 0 ? source[..comma] : source;
+        return header.Length <= 80 ? header : header[..80];
     }
 }

@@ -18,4 +18,9 @@ public interface IRunrunItClient
         CancellationToken cancellationToken = default);
 
     Task<bool> HasCommentContainingAsync(int taskId, string marker, CancellationToken cancellationToken = default);
+
+    Task<TaskReleaseSignals> InspectReleaseCommentsAsync(
+        int taskId,
+        string versionMarker,
+        CancellationToken cancellationToken = default);
 }

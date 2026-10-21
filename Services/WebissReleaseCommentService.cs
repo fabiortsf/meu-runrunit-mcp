@@ -85,22 +85,29 @@ public sealed class WebissReleaseCommentService(
                     continue;
                 }
 
-                if (commented.Count >= maxComments)
-                {
-                    hitCap = true;
-                    break;
-                }
-
-                if (await client.HasCommentContainingAsync(task.Id, WebissReleaseNotesMarker(), cancellationToken))
+                var signals = await client.InspectReleaseCommentsAsync(task.Id, WebissReleaseNotesMarker(), cancellationToken);
+                if (signals.HasVersionComment)
                 {
                     knownIds.Add(task.Id);
                     skipped.Add($"#{task.Id} já tem o comentário de versão");
                     continue;
                 }
 
+                if (string.IsNullOrWhiteSpace(signals.PullRequestUrl))
+                {
+                    skipped.Add($"#{task.Id} sem link de pull request");
+                    continue;
+                }
+
+                if (commented.Count >= maxComments)
+                {
+                    hitCap = true;
+                    break;
+                }
+
                 var created = await client.CreateTaskCommentAsync(task.Id, commentText, cancellationToken);
                 knownIds.Add(task.Id);
-                commented.Add($"#{task.Id} {task.Title} (comentário {created.Id})");
+                commented.Add($"#{task.Id} {task.Title} (comentário {created.Id}, {signals.PullRequestUrl})");
                 logger.LogInformation("Comentário de versão publicado na tarefa {TaskId}.", task.Id);
             }
 

@@ -299,7 +299,7 @@ Depois diga quais arquivos devo alterar e por quê.
 obter_informacoes_da_tarefa com taskId 12345
 ```
 
-A descrição nesse retorno vem em texto, sem tags. Para o HTML e as imagens, use `obter_html_da_descricao`.
+A descrição nesse retorno vem em texto. As imagens embutidas aparecem com a URL temporária de download. Para o HTML completo, use `obter_html_da_descricao`.
 
 ### Cenário: outro repositório no mesmo dia
 
@@ -316,7 +316,7 @@ analisar_tarefa taskId 200 projectRoot C:\dev\cliente-b\api-node
 | Ferramenta | Quando usar | Parâmetros principais |
 |------------|-------------|------------------------|
 | `analisar_tarefa` | Fluxo completo (tarefa + busca no código) | `taskId`, **`projectRoot`**, `extraQuery?`, `maxResults?` |
-| `obter_informacoes_da_tarefa` | Título, descrição em texto e comentários de usuários | `taskId` |
+| `obter_informacoes_da_tarefa` | Título, descrição em texto, comentários e imagens embutidas | `taskId` |
 | `obter_html_da_descricao` | HTML completo da descrição e as imagens embutidas, cada uma com URL temporária de download | `taskId` |
 | `comentar_tarefa` | Publicar um comentário com o texto que você enviar | `taskId`, `text` |
 | `comentar_entregas_webiss` | Comentar a próxima versão só nas entregas homologadas do WebISS atribuídas ao usuário do token | **`siteUrl`**: página inicial do ambiente. A versão está no rodapé, em `Versão: 5.3.0.43` |
@@ -330,7 +330,7 @@ Pastas ignoradas: `bin`, `obj`, `node_modules`, `.git`, `dist`, `packages`, etc.
 
 ### HTML da descrição e imagens
 
-`obter_informacoes_da_tarefa` remove o HTML. `obter_html_da_descricao` devolve o corpo inteiro, inclusive as tags `<img>`.
+`obter_informacoes_da_tarefa` e `analisar_tarefa` já trazem as imagens embutidas com a URL de download. `obter_html_da_descricao` devolve, além disso, o HTML completo.
 
 Cada imagem que aponta para um documento do Runrun.it inclui:
 
@@ -348,6 +348,7 @@ Cada imagem que aponta para um documento do Runrun.it inclui:
 - `evaluation_status` é `approved`
 - a etapa não contém "cancel"
 - ainda não existe o comentário de versão
+- algum comentário contém um link de pull request do GitHub, no formato `https://github.com/webfis/ERP/pull/4103`
 
 O texto é fixo. O número sai do rodapé da página, com o último trecho somado em 1:
 
@@ -604,4 +605,5 @@ Documentação oficial: https://runrun.it/api/documentation
 | O MCP analisa só MVC 5? | **Não.** Qualquer repo com arquivos-fonte suportados. |
 | Onde ficam as credenciais Runrun.it? | User Secrets ou `env` no `mcp.json` global. |
 | `comentar_entregas_webiss` comenta tarefa de outra pessoa? | **Não.** Só tarefas alocadas ao usuário do token, pelo id ou pelo nome. |
-| Como leio as imagens da descrição? | `obter_html_da_descricao`. A outra leitura de tarefa devolve texto sem HTML. |
+| `comentar_entregas_webiss` comenta tarefa sem pull request? | **Não.** Só quando algum comentário tem um link `https://github.com/.../pull/123`. |
+| Como leio as imagens da descrição? | `obter_informacoes_da_tarefa` e `analisar_tarefa` já trazem a URL. `obter_html_da_descricao` devolve também o HTML. |

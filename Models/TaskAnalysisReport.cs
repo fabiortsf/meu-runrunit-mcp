@@ -18,6 +18,7 @@ public sealed record TaskAnalysisReport(
             ## Próximo passo (agente)
 
             Use `read_file` com o mesmo `projectRoot` nos arquivos acima para ler trechos e produzir o plano de alteração.
+            Se houver imagens embutidas, abra cada URL de download antes de concluir a análise.
             """;
     }
 }

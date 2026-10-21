@@ -38,6 +38,7 @@ public sealed class RunrunItClient(
 
         var comments = await GetCommentsAsync(config, taskId, cancellationToken);
         var combined = TextHelper.BuildCombinedSearchText(title, descriptionRaw, comments);
+        var images = await ResolveEmbeddedImagesAsync(config, descriptionRaw, cancellationToken);
 
         return new TaskContext(
             taskId,
@@ -47,7 +48,8 @@ public sealed class RunrunItClient(
             boardName,
             url,
             comments,
-            combined);
+            combined,
+            images);
     }
 
     public async Task<TaskDescriptionHtml> GetTaskDescriptionHtmlAsync(
@@ -64,18 +66,7 @@ public sealed class RunrunItClient(
         if (string.IsNullOrWhiteSpace(html))
             html = await GetDescriptionFromTaskAsync(config, taskId, cancellationToken);
 
-        var images = new List<EmbeddedImage>();
-        foreach (var item in DescriptionImages.Extract(html))
-        {
-            string? downloadUrl = null;
-            if (item.DocumentId is int documentId)
-                downloadUrl = await ResolveDocumentDownloadUrlAsync(config, documentId, cancellationToken);
-            else if (IsAbsoluteHttp(item.Source))
-                downloadUrl = item.Source;
-
-            images.Add(new EmbeddedImage(item.Source, item.DocumentId, downloadUrl));
-        }
-
+        var images = await ResolveEmbeddedImagesAsync(config, html, cancellationToken);
         return new TaskDescriptionHtml(taskId, string.IsNullOrWhiteSpace(html) ? null : html, images);
     }
 
@@ -229,6 +220,55 @@ public sealed class RunrunItClient(
         return false;
     }
 
+    public async Task<TaskReleaseSignals> InspectReleaseCommentsAsync(
+        int taskId,
+        string versionMarker,
+        CancellationToken cancellationToken = default)
+    {
+        var config = options.Value;
+        ValidateCredentials(config);
+
+        using var request = CreateRequest(HttpMethod.Get, config, $"tasks/{taskId}/comments");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return new TaskReleaseSignals(false, null);
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        var hasVersionComment = false;
+        string? pullRequestUrl = null;
+
+        foreach (var element in EnumerateCommentElements(doc.RootElement))
+        {
+            var commentElement = element.TryGetProperty("comment", out var wrapped) ? wrapped : element;
+            var blob = CommentSearchText(commentElement);
+
+            if (!hasVersionComment
+                && !string.IsNullOrWhiteSpace(versionMarker)
+                && blob.Contains(versionMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                hasVersionComment = true;
+            }
+
+            pullRequestUrl ??= PullRequestLink.Find(blob);
+        }
+
+        return new TaskReleaseSignals(hasVersionComment, pullRequestUrl);
+    }
+
+    private static string CommentSearchText(JsonElement comment)
+    {
+        var text = GetString(comment, "text");
+        var body = GetString(comment, "body");
+        var html = GetString(comment, "html");
+        var raw = comment.GetRawText().Replace("\\/", "/", StringComparison.Ordinal);
+        return string.Join('\n', new[] { text, body, html, raw }.Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
     private async Task<string?> GetDescriptionFromTaskAsync(
         RunrunItOptions config,
         int taskId,
@@ -241,6 +281,26 @@ public sealed class RunrunItClient(
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         return ExtractDescriptionFromElement(UnwrapRoot(doc.RootElement));
+    }
+
+    private async Task<IReadOnlyList<EmbeddedImage>> ResolveEmbeddedImagesAsync(
+        RunrunItOptions config,
+        string? html,
+        CancellationToken cancellationToken)
+    {
+        var images = new List<EmbeddedImage>();
+        foreach (var item in DescriptionImages.Extract(html))
+        {
+            string? downloadUrl = null;
+            if (item.DocumentId is int documentId)
+                downloadUrl = await ResolveDocumentDownloadUrlAsync(config, documentId, cancellationToken);
+            else if (IsAbsoluteHttp(item.Source))
+                downloadUrl = item.Source;
+
+            images.Add(new EmbeddedImage(item.Source, item.DocumentId, downloadUrl));
+        }
+
+        return images;
     }
 
     private async Task<string?> ResolveDocumentDownloadUrlAsync(

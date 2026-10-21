@@ -10,7 +10,7 @@ internal static partial class DescriptionImages
     [GeneratedRegex(@"<img\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ImgTagRegex();
 
-    [GeneratedRegex("""\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("""(?<=\s)src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SrcRegex();
 
     [GeneratedRegex("""\bdata-document-id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
